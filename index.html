@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="es-MX">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>Órbita</title>
+  <link rel="stylesheet" href="/src/style.css">
+</head>
+<body>
+  <canvas id="fondo"></canvas>
+  <canvas id="juego"></canvas>
+
+  <div id="hud" hidden>
+    <section id="estado" class="panel">
+      <div class="fila-titulo"><strong id="nave-nombre"></strong><span><span id="rango"></span> · Nivel <b id="nivel"></b></span></div>
+      <div class="barra casco"><i id="barra-casco"></i><span id="txt-casco"></span></div>
+      <div class="barra escudo"><i id="barra-escudo"></i><span id="txt-escudo"></span></div>
+      <div class="barra xp"><i id="barra-xp"></i><span id="txt-xp"></span></div>
+      <div class="recursos">
+        <span title="Créditos">Créditos <b id="creditos"></b></span>
+        <span title="Plasmita">Plasmita <b id="plasmita"></b></span>
+      </div>
+    </section>
+
+    <section id="objetivo" class="panel" hidden>
+      <strong id="obj-nombre"></strong>
+      <div class="barra enemigo"><i id="obj-barra"></i><span id="obj-txt"></span></div>
+      <small id="obj-nota"></small>
+    </section>
+
+    <section id="mapa" class="panel"><canvas id="minimapa" width="360" height="360"></canvas><div id="coordenadas"></div></section>
+
+    <section id="dev" class="panel" hidden>
+      <button id="btn-rango"></button>
+      <button id="btn-empresa"></button>
+      <button id="btn-camara">Cámara libre <kbd>C</kbd></button>
+      <div id="cam-ayuda" hidden>
+        <button id="btn-anclar">Anclar a la nave <kbd>F</kbd></button>
+        <small id="cam-vistas" hidden></small>
+        <div id="cam-pos"></div>
+        <small>W/S avanzar · A/D lados · Q/E bajar y subir<br>Arrastra para mirar · Rueda: velocidad · Shift: rápido</small>
+      </div>
+    </section>
+
+    <div id="etiqueta"><span id="etiqueta-insignia"></span><span id="etiqueta-nombre"></span></div>
+
+    <div id="mensajes"></div>
+    <div id="efectos"></div>
+
+    <section id="acciones">
+      <button id="btn-portal" class="accion portal" hidden><span id="btn-portal-txt"></span> <kbd>J</kbd></button>
+      <button id="btn-hangar" class="accion hangar">Hangar <kbd>H</kbd></button>
+      <div id="habilidades"></div>
+      <button id="btn-atacar" class="accion atacar">Atacar <kbd>Espacio</kbd></button>
+    </section>
+  </div>
+
+  <div id="hangar" class="capa" hidden>
+    <div class="ventana">
+      <header><h1>Hangar</h1><span id="hangar-saldo"></span><button id="hangar-cerrar" aria-label="Cerrar hangar">✕</button></header>
+      <div class="hangar-cuerpo">
+        <ul id="hangar-lista"></ul>
+        <div class="hangar-visor"><canvas id="hangar-canvas"></canvas></div>
+        <div class="hangar-datos">
+          <h2 id="hd-nombre"></h2>
+          <dl id="hd-stats"></dl>
+          <div id="hd-especial"></div>
+          <p id="hd-precio"></p>
+          <button id="hd-boton" class="principal"></button>
+          <small id="hd-nota"></small>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="muerte" class="capa aviso" hidden><div><h1>Nave destruida</h1><p>Reapareciendo en la base…</p></div></div>
+  <div id="carga" class="capa aviso"><div><h1>Órbita</h1><p id="carga-txt">Cargando modelos…</p></div></div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

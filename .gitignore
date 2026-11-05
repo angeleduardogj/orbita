@@ -1,0 +1,13 @@
+# Assets con licencia: NO subir ni publicar los modelos crudos
+assets/
+public/models/
+public/textures/
+*.zip
+*.unitypackage
+*.fbx
+*.FBX
+*.glb
+
+node_modules/
+shots/
+.DS_Store
