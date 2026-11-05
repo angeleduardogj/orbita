@@ -19,11 +19,11 @@ Las naves ya apuntan a +Z. Solo el dron `SM_Veh_Drone_Attach_01` se gira 180°.
 
 | Pieza | Modelo | Textura | Tamaño (u) |
 |---|---|---|---:|
-| Chispa | `SM_Ship_Fighter_01` | `Texture_01_A` | 104 |
-| Vigía | `SM_Ship_Fighter_04` | `Texture_01_A` | 116 |
-| Aguja | `SM_Ship_Stealth_03` | `Texture_01_A` | 128 |
-| Marea | `SM_Ship_Fighter_Heavy_01` | `Texture_01_A` | 146 |
-| Coloso | `SM_Ship_Bomber_02` | `Texture_01_A` | 170 |
+| Chispa | `SM_Ship_Fighter_01` | `Texture_01_A` | 90 |
+| Vigía | `SM_Ship_Fighter_04` | `Texture_01_A` | 118 |
+| Aguja | `SM_Ship_Stealth_03` | `Texture_01_A` | 132 |
+| Marea | `SM_Ship_Fighter_Heavy_01` | `Texture_01_A` | 150 |
+| Coloso | `SM_Ship_Bomber_02` | `Texture_01_A` | 190 |
 | Escarabajo | `SM_Ship_Fighter_Heavy_02` | `Texture_01_A` | 190 |
 | Fantasma | `SM_Ship_Stealth_01` | `Texture_01_A` | 215 |
 | Bastión | `SM_Ship_Cruiser_01` | `Texture_01_A` | 250 |
@@ -35,7 +35,7 @@ Las naves ya apuntan a +Z. Solo el dron `SM_Veh_Drone_Attach_01` se gira 180°.
 | Yunque | `SM_Ship_Fighter_Heavy_04` | `Texture_01_A` | 150 |
 | Granizo | `SM_Ship_Bomber_01` | `Texture_01_A` | 160 |
 | Eclipse | `SM_Ship_Stealth_04` | `Texture_01_A` | 165 |
-| Trueno | `SM_Ship_Bomber_04` | `Texture_01_A` | 170 |
+| Trueno | `SM_Ship_Bomber_04` | `Texture_01_A` | 190 |
 | Tormenta | `SM_Ship_Bomber_03` | `Texture_01_A` | 180 |
 | Mula | `SM_Ship_Transport_01` | `Texture_01_A` | 230 |
 | Centinela | `SM_Ship_Cruiser_03` | `Texture_01_A` | 255 |

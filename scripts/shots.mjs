@@ -16,7 +16,7 @@ const espera = (ms) => pagina.waitForTimeout(ms);
 const foto = (nombre) => pagina.screenshot({ path: `shots/${nombre}.png` });
 
 // Juego en la base
-await pagina.goto(`${base}/?demo`);
+await pagina.goto(`${base}/juego/?demo`);
 await pagina.waitForFunction(() => window.orbita, null, { timeout: 60000 });
 await espera(1500);
 await foto('01-base');

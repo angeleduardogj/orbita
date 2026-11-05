@@ -1,7 +1,7 @@
 // Simulación del juego: lógica pura a tick fijo (20 Hz), sin nada de render ni DOM.
 // El render lee el estado `s` y consume la lista s.eventos para los efectos visuales.
-import { MUNDO, COMBATE, MUERTE, NIVELES, INICIO, INICIO_DEMO, HABILIDADES, NAVES, NPCS, DRONES, EMPRESAS, EMPRESA_INICIAL, MAPAS, POBLACION, RADIO_PORTAL } from './data.js';
-import { ASSETS } from './assetmap.js';
+import { MUNDO, COMBATE, MUERTE, NIVELES, INICIO, INICIO_DEMO, HABILIDADES, NAVES, NPCS, DRONES, EMPRESAS, EMPRESA_INICIAL, MAPAS, POBLACION, RADIO_PORTAL, ARMAMENTO, LASERES, MISILES, MEJORA_ARMA, MEJORA_BASE, TIPOS } from './data.js';
+import { ASSETS, puestosDe, puestosSockets, canonesDe, largoCanon } from './assetmap.js';
 
 export const DT = 1 / MUNDO.tickHz;
 const LIMITE = MUNDO.tamano / 2;
@@ -31,6 +31,7 @@ export function crearEstado({ demo = false, dev = false, empresa = EMPRESA_INICI
     naveId: ini.nave, naves: dev ? NAVES.map((n) => n.id) : [ini.nave],
     nivel: ini.nivel, xp: NIVELES.xpParaNivel(ini.nivel), creditos: dev ? Infinity : ini.creditos, plasmita: ini.plasmita,
     casco: 0, escudo: 0, sinDanio: 99, cdDisparo: 0,
+    equipo: {}, laserInicial: ini.laser, dronesPropios: ini.drones, // equipo: nave -> sus sockets
     objetivoId: null, atacando: false,
     efectos: {},   // nombre -> segundos restantes
     recargas: { impulso: 0, reparacion: 0, barrera: 0, especial: 0 },
@@ -39,12 +40,12 @@ export function crearEstado({ demo = false, dev = false, empresa = EMPRESA_INICI
   };
   const s = {
     tiempo: 0, siguienteId: 1, jugador, mapaId: empresa,
-    npcs: [], drones: [], proyectiles: [], botin: [], minas: [], zonasCura: [], reapariciones: [], eventos: [],
+    npcs: [], drones: [], proyectiles: [], misiles: [], botin: [], minas: [], zonasCura: [], reapariciones: [], eventos: [],
   };
   const st = statsJugador(jugador);
   jugador.casco = st.casco;
   jugador.escudo = st.escudo;
-  crearDrones(s, jugador, ini.drones);
+  crearDrones(s, jugador, ini.drones.slice(0, cupoDrones(jugador)));
   poblarMapa(s, empresa);
   return s;
 }
@@ -57,7 +58,7 @@ function poblarMapa(s, id) {
   radioSeguro = !mapa.empresa || mapa.empresa === j.empresa ? MUNDO.radioZonaSegura : 0;
   s.npcs = [];
   s.drones = s.drones.filter((d) => d.dueno === j && !d.temporal);
-  s.proyectiles = []; s.botin = []; s.minas = []; s.zonasCura = []; s.reapariciones = [];
+  s.proyectiles = []; s.misiles = []; s.botin = []; s.minas = []; s.zonasCura = []; s.reapariciones = [];
   const poner = (lista, empresa) => {
     for (const [tipo, cantidad] of Object.entries(lista)) {
       for (let i = 0; i < cantidad; i++) crearNpc(s, tipo, empresa);
@@ -100,6 +101,11 @@ export function cambiarEmpresa(s, empresa) {
   entrarMapa(s, empresa);
 }
 
+const assetDe = (e, s) => (e === s.jugador ? `nave_${e.naveId}` : e.tipo === 'sanguijuela' ? 'dron_reparacion_rojo' : `npc_${e.tipo}`);
+const tamDe = (e, s) => ASSETS[assetDe(e, s)].tam;
+// Distancia de casco a casco: las naves grandes no disparan desde dentro de sí mismas
+export const distBorde = (s, a, b) => dist(a, b) - (tamDe(a, s) + tamDe(b, s)) * COMBATE.radioCasco;
+
 export const esHostil = (s, n) => (n.empresa ?? n.dueno.empresa) !== s.jugador.empresa;
 
 function crearNpc(s, tipo, empresa = 'sirko') {
@@ -120,6 +126,8 @@ function crearNpc(s, tipo, empresa = 'sirko') {
   crearDrones(s, n, d.drones ?? []);
 }
 
+const cupoDrones = (j) => TIPOS[naveDe(j.naveId).tipo].drones;
+
 // Reparte los drones alrededor de su dueño
 function crearDrones(s, dueno, tipos) {
   tipos.slice(0, DRONES.maximo).forEach((tipo, i) => crearDron(s, dueno, tipo, (i / tipos.length) * Math.PI * 2));
@@ -137,12 +145,23 @@ function crearDron(s, dueno, tipo, angulo, temporal = false) {
 
 // ---------- Stats ----------
 
+// Disparo de una nave según sus láseres. Con todos los sockets en láser básico da los números
+// de la nave; cada socket vacío le quita su parte del daño. Cadencia y alcance son el promedio.
+export function potenciaDe(j, naveId) {
+  const n = naveDe(naveId), f = 1 + NIVELES.bonusPorNivel * (j.nivel - 1), sockets = equipoDe(j, naveId).laser;
+  const puestos = sockets.filter(Boolean), l = (a) => LASERES[a.id];
+  const media = (campo) => (puestos.length ? puestos.reduce((t, a) => t + l(a)[campo], 0) / puestos.length : 1);
+  const suma = puestos.reduce((t, a) => t + l(a).danio * MEJORA_ARMA.danio[a.nivel - 1], 0);
+  return { danio: n.danio * f * suma / sockets.length, cadencia: n.cadencia * media('cadencia'), alcance: n.alcance * media('alcance') };
+}
+
 // Stats reales del jugador con su nave, su nivel y los efectos activos.
 export function statsJugador(j) {
   const n = naveDe(j.naveId), e = n.especial, f = 1 + NIVELES.bonusPorNivel * (j.nivel - 1);
+  const p = potenciaDe(j, j.naveId);
   const st = {
-    casco: n.casco * f, escudo: n.escudo * f, danio: n.danio * f, cadencia: n.cadencia,
-    alcance: n.alcance, velocidad: n.velocidad, giro: n.giro, aceleracion: n.aceleracion,
+    casco: n.casco * f, escudo: n.escudo * f, base: n.danio * f, danio: p.danio, cadencia: p.cadencia,
+    alcance: p.alcance, velocidad: n.velocidad, giro: n.giro, aceleracion: n.aceleracion,
   };
   if (j.efectos.impulso) st.velocidad *= HABILIDADES.impulso.velocidad;
   if (j.efectos.rafaga) st.cadencia /= e.cadencia;
@@ -164,7 +183,9 @@ export function npcEnPunto(s, x, z, tolerancia = 70) {
   let mejor = null, mejorD = tolerancia;
   for (const n of atacables(s)) {
     const d = Math.hypot(n.x - x, n.z - z);
-    if (d < mejorD && esHostil(s, n)) { mejor = n; mejorD = d; }
+    // Los objetivos grandes se pueden seleccionar en todo su casco
+    const margen = Math.max(mejorD, tamDe(n, s) * 0.45);
+    if (d < margen && esHostil(s, n)) { mejor = n; mejorD = Math.min(d, mejorD); }
   }
   return mejor;
 }
@@ -279,12 +300,69 @@ export function comprarNave(s, id) {
   return true;
 }
 
+// ---------- Armas ----------
+
+const armaDe = (id) => LASERES[id] ?? MISILES[id];
+const catalogo = (clase) => (clase === 'laser' ? LASERES : MISILES);
+
+// Sockets de una nave: se crean la primera vez, con todos los láseres básicos puestos
+export function equipoDe(j, naveId = j.naveId) {
+  const t = TIPOS[naveDe(naveId).tipo], vacios = (n) => Array(n).fill(null);
+  j.equipo[naveId] ??= {
+    laser: Array.from({ length: t.laser }, () => ({ id: j.laserInicial, nivel: 1 })),
+    misil: vacios(t.misil), utilidad: vacios(t.utilidad),
+  };
+  return j.equipo[naveId];
+}
+
+// Dónde va cada socket de la nave
+export const socketsDe = (naveId) => puestosSockets(`nave_${naveId}`, TIPOS[naveDe(naveId).tipo]);
+
+// Lo que se ve montado en la nave: cada arma instalada con su puesto
+export function armasMontadas(j, naveId = j.naveId) {
+  const equipo = equipoDe(j, naveId), puestos = socketsDe(naveId);
+  const de = (clase) => equipo[clase].flatMap((a, i) => (a && puestos[clase][i] ? [{ arma: a.id, nivel: a.nivel, puesto: puestos[clase][i], clase }] : []));
+  return [...de('laser'), ...de('misil')];
+}
+
+export const cabeEnNave = (naveId, id) => armaDe(id).tamano <= TIPOS[naveDe(naveId).tipo].tamano;
+
+export function precioMejora(arma) {
+  if (arma.nivel >= ARMAMENTO.nivelMaximo) return null;
+  return Math.round(Math.max(armaDe(arma.id).precio, MEJORA_BASE) * MEJORA_ARMA.precio[arma.nivel]);
+}
+
+// Pone un arma nueva en el socket; la que estaba se pierde. Sin id deja el socket vacío.
+export function instalarArma(s, naveId, clase, i, id) {
+  const j = s.jugador, equipo = equipoDe(j, naveId);
+  if (!j.naves.includes(naveId) || !puedeUsarHangar(s) || i >= equipo[clase].length) return false;
+  if (!id) { equipo[clase][i] = null; return true; }
+  const arma = catalogo(clase)[id];
+  if (!arma || !cabeEnNave(naveId, id) || j.creditos < arma.precio) return false;
+  j.creditos -= arma.precio;
+  equipo[clase][i] = { id, nivel: 1 };
+  mensaje(s, `Instalaste ${arma.nombre}`, 'bueno');
+  return true;
+}
+
+export function mejorarArma(s, naveId, clase, i) {
+  const j = s.jugador, arma = equipoDe(j, naveId)[clase][i];
+  const precio = arma ? precioMejora(arma) : null;
+  if (precio === null || !j.naves.includes(naveId) || j.creditos < precio || !puedeUsarHangar(s)) return false;
+  j.creditos -= precio;
+  arma.nivel++;
+  mensaje(s, `${armaDe(arma.id).nombre} subió a nivel ${arma.nivel}`, 'bueno');
+  return true;
+}
+
 export function equiparNave(s, id) {
   const j = s.jugador;
   if (!j.naves.includes(id) || !puedeUsarHangar(s)) return false;
   j.naveId = id;
   j.efectos = {};
   j.recargas.especial = 0;
+  s.drones = s.drones.filter((d) => d.dueno !== j || d.temporal); // cada tipo lleva su cupo
+  crearDrones(s, j, j.dronesPropios.slice(0, cupoDrones(j)));
   const st = statsJugador(j);
   j.casco = st.casco;
   j.escudo = st.escudo;
@@ -349,6 +427,7 @@ export function tick(s) {
   for (const n of [...s.npcs]) tickNpc(s, n);
   tickDrones(s);
   tickProyectiles(s);
+  tickMisiles(s);
   tickBotin(s);
   tickMinas(s);
   tickZonasCura(s);
@@ -405,19 +484,113 @@ function tickJugador(s) {
   const obj = objetivoActual(s);
   if (!obj) { j.objetivoId = null; j.atacando = false; }
   j.cdDisparo -= DT;
-  const aTiro = obj && j.atacando && dist(j, obj) <= st.alcance && !enZonaSegura(j) && !enZonaSegura(obj);
-  apuntar(j, aTiro ? Math.atan2(obj.x - j.x, obj.z - j.z) : j.rumbo, st.giro);
-  if (aTiro && j.cdDisparo <= 0) {
+  const aTiro = obj && j.atacando && distBorde(s, j, obj) <= st.alcance && !enZonaSegura(j) && !enZonaSegura(obj);
+  apuntar(j, aTiro && !llevaTorretas(j, s) ? Math.atan2(obj.x - j.x, obj.z - j.z) : j.rumbo, st.giro);
+  if (aTiro && j.cdDisparo <= 0 && st.danio > 0) {
     j.cdDisparo = st.cadencia;
     disparar(s, j, obj, st.danio, 'jugador');
     romperSigilo(j);
   }
+  for (const m of equipoDe(j).misil) if (m) m.cd = Math.max(0, (m.cd ?? 0) - DT);
+}
+
+const llevaTorretas = (e, s) => (e === s.jugador ? naveDe(e.naveId).torretas : !!NPCS[e.tipo]?.torretas);
+
+// Nivel de los cañones que se ven en un enemigo
+export const nivelCanones = (e) => NPCS[e.tipo]?.arma ?? 1;
+
+// Cañones que tiene puestos: los drones y las naves sin puestos disparan desde su centro
+function canonesActivos(s, e) {
+  if (e.dueno) return [];
+  if (e === s.jugador) return armasMontadas(e).filter((a) => a.clase === 'laser').map((a) => a.puesto);
+  const id = assetDe(e, s);
+  return puestosDe(id).slice(0, canonesDe(id, nivelCanones(e)));
+}
+
+// Punto del mundo donde queda un puesto de la nave
+function puntoDe(e, [px, , pz], tam) {
+  const seno = Math.sin(e.h), coseno = Math.cos(e.h);
+  return { x: e.x + (px * coseno + pz * seno) * tam, z: e.z + (pz * coseno - px * seno) * tam };
+}
+
+// Punta del cañón que le toca: van turnando para que dispare toda la nave
+function bocaDe(s, e, a, canones) {
+  const tam = tamDe(e, s);
+  e.torreta = ((e.torreta ?? 0) + 1) % canones.length;
+  const { x, z } = puntoDe(e, canones[e.torreta], tam);
+  const ang = Math.atan2(a.x - x, a.z - z), largo = largoCanon(tam);
+  return { x: x + Math.sin(ang) * largo, z: z + Math.cos(ang) * largo };
 }
 
 function disparar(s, de, a, danio, bando) {
   const empresa = de.empresa ?? de.dueno.empresa; // el láser sale del color de su bando
-  s.eventos.push({ t: 'disparo', id: de.id, x: de.x, z: de.z, ang: Math.atan2(a.x - de.x, a.z - de.z), empresa });
-  s.proyectiles.push({ x: de.x, z: de.z, px: de.x, pz: de.z, objetivo: a, danio, bando, empresa });
+  const canones = canonesActivos(s, de), torreta = canones.length > 0;
+  const salva = Math.max(1, Math.min(canones.length, ARMAMENTO.salva));
+  for (let i = 0; i < salva; i++) {
+    const { x, z } = torreta ? bocaDe(s, de, a, canones) : de;
+    s.eventos.push({ t: 'disparo', id: de.id, x, z, ang: Math.atan2(a.x - x, a.z - z), empresa, torreta });
+    s.proyectiles.push({ x, z, px: x, pz: z, objetivo: a, danio: danio / salva, bando, empresa });
+  }
+  de.apunta = Math.atan2(a.x - de.x, a.z - de.z);
+  de.apuntaHasta = s.tiempo + ARMAMENTO.sigueApuntando;
+}
+
+// Cuántos lanzadores tiene la nave, cuántos están listos y lo que le falta al más próximo
+export function estadoMisiles(j) {
+  const puestos = equipoDe(j).misil.filter(Boolean), listos = puestos.filter((m) => !m.cd).length;
+  return { total: puestos.length, listos, resta: listos ? 0 : Math.min(...puestos.map((m) => m.cd)) };
+}
+
+// El piloto los lanza: salen todos los que estén listos hacia el objetivo
+export function dispararMisiles(s) {
+  const j = s.jugador, obj = objetivoActual(s), { total, listos } = estadoMisiles(j);
+  if (j.muerto || !total) return false;
+  if (!obj) { mensaje(s, 'Selecciona un enemigo primero', 'aviso'); return false; }
+  if (!listos) return false;
+  const st = statsJugador(j);
+  if (enZonaSegura(j) || enZonaSegura(obj)) { mensaje(s, 'No se pueden lanzar misiles en la zona segura', 'aviso'); return false; }
+  if (distBorde(s, j, obj) > st.alcance) { mensaje(s, 'Objetivo fuera de alcance', 'aviso'); return false; }
+  const equipo = equipoDe(j), puestos = socketsDe(j.naveId).misil;
+  equipo.misil.forEach((m, i) => { if (m && !m.cd && puestos[i]) lanzarMisil(s, j, obj, st, m, puestos[i], equipo.misil.length); });
+  return true;
+}
+
+// Cada lanzador recarga por su cuenta; entre todos los sockets suman el daño del misil
+function lanzarMisil(s, j, a, st, socket, puesto, sockets) {
+  const m = MISILES[socket.id], mejora = MEJORA_ARMA.danio[socket.nivel - 1], { x, z } = puntoDe(j, puesto, tamDe(j, s));
+  socket.cd = m.recarga;
+  const ang = Math.atan2(a.x - x, a.z - z), rumbo = ang + Math.sign(puesto[0] || 1) * m.salida; // cada lado abre hacia afuera
+  s.eventos.push({ t: 'disparo', id: j.id, x, z, ang: rumbo, empresa: j.empresa, torreta: true });
+  s.misiles.push({
+    id: s.siguienteId++, x, z, px: x, pz: z, h: rumbo, rumbo, edad: 0, giro: m.giro, ondula: m.ondula, estela: m.estela,
+    objetivo: a, danio: st.base * m.danio * mejora / sockets, velocidad: m.velocidad, radio: m.radio, asset: m.asset,
+  });
+  romperSigilo(j);
+}
+
+// Persiguen a su blanco; si se destruye antes, estallan donde lo perdieron
+function tickMisiles(s) {
+  s.misiles = s.misiles.filter((m) => {
+    m.px = m.x; m.pz = m.z;
+    const paso = m.velocidad * DT, vivo = s.npcs.includes(m.objetivo) || s.drones.includes(m.objetivo);
+    if (vivo) { m.bx = m.objetivo.x; m.bz = m.objetivo.z; }
+    const d = Math.hypot((m.bx ?? m.x) - m.x, (m.bz ?? m.z) - m.z);
+    m.edad += DT;
+    if (d > Math.max(paso, ARMAMENTO.radioImpacto) && m.edad < ARMAMENTO.vidaMisil) {
+      // Corrige más entre más tiempo lleva, para que ninguno se quede dando vueltas al blanco
+      const giro = m.giro * (1 + m.edad * 1.5) * DT;
+      m.rumbo += clamp(difAngulo(Math.atan2(m.bx - m.x, m.bz - m.z), m.rumbo), -giro, giro);
+      m.h = m.rumbo + m.ondula * Math.sin(m.edad * 16) * Math.min(1, d / 150);
+      m.x += Math.sin(m.h) * paso;
+      m.z += Math.cos(m.h) * paso;
+      return true;
+    }
+    s.eventos.push({ t: 'explosion', x: m.x, z: m.z, tam: m.radio ? 1 : 0.45 });
+    if (vivo && !enZonaSegura(m.objetivo)) danarNpc(s, m.objetivo, m.danio);
+    // Copia de la lista: los que mueren dentro del radio salen de ella
+    if (m.radio) for (const n of [...atacables(s)]) if (n !== m.objetivo && esHostil(s, n) && dist(n, m) < m.radio && !enZonaSegura(n)) danarNpc(s, n, m.danio);
+    return false;
+  });
 }
 
 function tickProyectiles(s) {
@@ -444,6 +617,7 @@ function tickProyectiles(s) {
 
 function danarNpc(s, n, danio, delJugador = true) {
   n.casco -= danio;
+  if (delJugador) s.eventos.push({ t: 'danio', x: n.x, z: n.z, valor: danio });
   if (n.tipo === 'sanguijuela') {
     if (n.casco <= 0) matarSanguijuela(s, n);
     return;
@@ -492,6 +666,7 @@ function danarJugador(s, danio) {
   const alEscudo = Math.min(j.escudo, danio);
   j.escudo -= alEscudo;
   j.casco -= danio - alEscudo;
+  s.eventos.push({ t: 'danio', x: j.x, z: j.z, valor: danio, propio: true });
   if (j.casco <= 0) morir(s);
 }
 
@@ -530,7 +705,7 @@ function tickNpc(s, n) {
     n.buscar = 1;
     n.blanco = blancoDe(s, n, visible) ?? n.blanco;
   }
-  const b = n.blanco, distancia = b ? dist(n, b) : Infinity;
+  const b = n.blanco, distancia = b ? distBorde(s, n, b) : Infinity;
 
   if (n.estado === 'patrulla') {
     if (b) n.estado = 'persecucion';
@@ -542,8 +717,8 @@ function tickNpc(s, n) {
     if (distancia > d.alcance * 0.7) {
       pilotar(n, b.x, b.z, d);
     } else {
-      // Ya está en rango: frena y encara a su blanco
-      girarSuave(n, difAngulo(Math.atan2(b.x - n.x, b.z - n.z), n.rumbo), d.giro);
+      // Ya está en rango: frena y encara a su blanco, salvo que dispare con torretas
+      if (!d.torretas) girarSuave(n, difAngulo(Math.atan2(b.x - n.x, b.z - n.z), n.rumbo), d.giro);
       acelerar(n, 0, d.aceleracion);
       avanzar(n);
     }
@@ -579,8 +754,6 @@ function tickNpc(s, n) {
 }
 
 // ---------- Drones ----------
-
-const tamDe = (e, s) => ASSETS[e === s.jugador ? `nave_${e.naveId}` : `npc_${e.tipo}`].tam;
 
 // Los 9 puestos son el contorno de un triángulo con la punta hacia arriba en pantalla: primero
 // las esquinas y luego los lados, para que con pocos drones siga parejo. Es de radio 1.
@@ -632,7 +805,8 @@ function tickDrones(s) {
     else {
       if (d.temporal) orbitar(d, j, radioExterior(j, s));
       else volarA(d, ...Object.values(puestoDe(d, s)), Infinity);
-      d.h = d.dueno.h;
+      // En naves con torretas los drones de ataque apuntan solos, porque la nariz no sigue al blanco
+      if (d.tipo !== 'ataque' || !llevaTorretas(d.dueno, s)) d.h = d.dueno.h;
       if (d.tipo === 'ataque') tickDronAtaque(s, d);
       else tickDronReparacion(s, d);
     }
@@ -644,6 +818,10 @@ function tickDronAtaque(s, d) {
   const j = s.jugador, c = DRONES.ataque;
   const blanco = d.bando === 'jugador' ? (j.atacando && !j.efectos.invisible && !enZonaSegura(j) ? objetivoActual(s) : null)
     : (d.dueno.blanco === j && !j.muerto && !j.efectos.invisible && !enZonaSegura(d.dueno) ? j : null);
+  if (llevaTorretas(d.dueno, s)) {
+    const mira = blanco ?? { x: d.x + Math.sin(d.dueno.h), z: d.z + Math.cos(d.dueno.h) };
+    encarar(d, mira.x, mira.z);
+  }
   if (blanco && dist(d, blanco) <= c.alcance && d.cd <= 0) {
     d.cd = c.cadencia;
     disparar(s, d, blanco, c.danio, d.bando);
@@ -694,7 +872,7 @@ function tickBotin(s) {
   const j = s.jugador;
   s.botin = s.botin.filter((b) => {
     b.vida -= DT;
-    if (!j.muerto && dist(b, j) < COMBATE.radioBotin) {
+    if (!j.muerto && dist(b, j) < Math.max(COMBATE.radioBotin, tamDe(j, s) * COMBATE.radioCasco)) {
       j.creditos += b.creditos;
       j.plasmita += b.plasmita;
       const extra = b.plasmita ? ` y ${b.plasmita} plasmita` : '';

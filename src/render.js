@@ -1,9 +1,9 @@
 // Escena 3D del juego: dibuja lo que hay en el estado de la simulación.
 import * as THREE from 'three';
 import { MUNDO, NPCS, EMPRESAS, MAPAS, RADIO_PORTAL, nombreSector } from './data.js';
-import { ASSETS } from './assetmap.js';
-import { naveDe, statsJugador, esHostil, hayZonaSegura } from './sim.js';
-import { instancia, instanciaUnica, agregarLuces, geometria, texturasFx, pintar, encenderLuces } from './models.js';
+import { ASSETS, canonesDe } from './assetmap.js';
+import { naveDe, statsJugador, esHostil, hayZonaSegura, nivelCanones, armasMontadas } from './sim.js';
+import { instancia, instanciaUnica, agregarLuces, geometria, texturasFx, pintar, encenderLuces, montarCanones, montarArmas } from './models.js';
 import { Fondo } from './background.js';
 import { Efectos, planoFx, ALTURA_NAVES } from './fx.js';
 import { CamaraLibre } from './camara-libre.js';
@@ -13,16 +13,20 @@ export { ALTURA_NAVES };
 const INCLINACION = THREE.MathUtils.degToRad(55); // elevación de la cámara sobre el plano
 const AZIMUT = 0; // sin giro: X va a lo ancho de la pantalla y Z a lo alto, igual que en el minimapa
 const ZOOM_MIN = 520, ZOOM_MAX = 1500;
+const TAM_SIN_ALEJAR = 130, TAM_POR_ZOOM = 420; // hasta ese tamaño no se aleja; luego +100 % cada 420
 const ANCHO_MINIMO = 640; // en pantallas verticales se abre la vista para ver el alcance de las armas
 const RADIO_CIRCULO = 2.72; // Circle_Dashes deja margen: lado del plano por unidad de radio
 const PARALAJE_LIBRE = 6; // pantallas de fondo por radián girado con la cámara libre
 const BASES_CHOCADAS = [ // asset, x, y, z, inclinación en X y en Z
-  ['base_tierra', -300, -120, 0, 0.1, 0.22],
-  ['base_marte', 310, -160, 60, -0.08, -0.2],
-  ['base_venus', 0, -140, 400, 0.22, 0.05],
+  ['base_tierra', -480, -190, 0, 0.1, 0.22],
+  ['base_marte', 500, -250, 100, -0.08, -0.2],
+  ['base_venus', 0, -220, 640, 0.22, 0.05],
 ];
 const ESCALA_CHOCADAS = 0.62;
 const RITMO_GUERRA = 1.4; // segundos entre explosiones en las bases chocadas
+const GIRO_CANONES = 7; // qué tan rápido siguen los cañones a su blanco
+const ALCANCE_SACUDIDA = 800; // explosiones más lejos no mueven la cámara
+const QUIETO = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const CASCO_CRITICO = 0.35; // por debajo de esta fracción la nave echa humo
 
 // Retícula del pack (SM_Hud_Reticle_*), dibujada sin luces
@@ -63,6 +67,7 @@ export class Escena {
     this.drones = new Map();
     this.botin = new Map();
     this.minas = new Map();
+    this.misiles = new Map();
     this.zonasCura = new Map();
 
     this.crearMundo();
@@ -83,7 +88,9 @@ export class Escena {
 
   aplicarZoom() {
     const aspecto = innerWidth / innerHeight;
-    this.altoVisible = Math.max(this.zoom, ANCHO_MINIMO / aspecto);
+    // Entre más grande la nave, más lejos la cámara: una capital ve más mapa que un interceptor
+    const nave = 1 + Math.max(0, (this.jugador?.tam ?? 0) - TAM_SIN_ALEJAR) / TAM_POR_ZOOM;
+    this.altoVisible = Math.max(this.zoom * nave, ANCHO_MINIMO / aspecto);
     const m = this.altoVisible / 2;
     Object.assign(this.camara, { left: -m * aspecto, right: m * aspecto, top: m, bottom: -m });
     this.camara.updateProjectionMatrix();
@@ -160,8 +167,8 @@ export class Escena {
     this.zonasPortal = [];
     if (empresa) {
       // Base un poco por debajo del plano, para que las naves pasen por encima; el planeta detrás
-      this.base = poner(`base_${empresa}`, 0, -90, 0, empresa);
-      this.planeta = poner(`planeta_${empresa}`, -1150, -1300, -560);
+      this.base = poner(`base_${empresa}`, 0, -145, 0, empresa);
+      this.planeta = poner(`planeta_${empresa}`, -1750, -2600, -1270);
     } else {
       // Las tres bases, trabadas entre sí en plena guerra
       for (const [asset, x, y, z, rx, rz] of BASES_CHOCADAS) {
@@ -219,13 +226,13 @@ export class Escena {
         new THREE.LineBasicMaterial({ color: hex, transparent: true, opacity: opacidad, depthWrite: false }),
       ));
     };
-    lineas(MUNDO.subdivision, 0x6fa8e8, 0.42);
-    lineas(MUNDO.sector, 0x9fd0ff, 0.8);
+    lineas(MUNDO.subdivision, 0xb5bac1, 0.42);
+    lineas(MUNDO.sector, 0xf2f3f5, 0.8);
 
     // Fondo azul del plano, solo dentro del mapa
     const fondo = new THREE.Mesh(
       new THREE.PlaneGeometry(MUNDO.tamano, MUNDO.tamano),
-      new THREE.MeshBasicMaterial({ color: 0x0f3a78, transparent: true, opacity: 0.3, depthWrite: false }),
+      new THREE.MeshBasicMaterial({ color: 0x2b2d31, transparent: true, opacity: 0.3, depthWrite: false }),
     );
     fondo.rotation.x = -Math.PI / 2;
     fondo.position.y = -2;
@@ -234,7 +241,7 @@ export class Escena {
     // Borde del mapa
     grupo.add(new THREE.LineLoop(
       new THREE.BufferGeometry().setFromPoints([[-L, -L], [L, -L], [L, L], [-L, L]].map(([x, z]) => new THREE.Vector3(x, 0, z))),
-      new THREE.LineBasicMaterial({ color: 0xbfe0ff }),
+      new THREE.LineBasicMaterial({ color: 0xf2f3f5 }),
     ));
 
     // Nombre de cada sector, en la esquina de su celda
@@ -258,7 +265,7 @@ export class Escena {
     g.font = '600 96px ui-monospace, Menlo, monospace';
     g.textAlign = 'center';
     g.textBaseline = 'middle';
-    g.fillStyle = '#9fd0ff';
+    g.fillStyle = '#b5bac1';
     g.fillText(texto, 128, 64);
     const textura = new THREE.CanvasTexture(c);
     textura.colorSpace = THREE.SRGBColorSpace;
@@ -310,6 +317,8 @@ export class Escena {
     const def = ASSETS[`nave_${naveId}`];
     const motores = this.fx.agregarMotores(modelo, def);
     this.jugador = { grupo, modelo, naveId, empresa, materiales, motores, tam: def.tam };
+    for (const o of this.drones.values()) if (o.dueno.id === 0) pintar(o.modelo, empresa); // al cambiar de empresa en dev
+    this.aplicarZoom();
   }
 
   crearNpc(n) {
@@ -336,18 +345,26 @@ export class Escena {
     const tam = ASSETS[`npc_${n.tipo}`].tam;
     barra.scale.set(Math.max(50, tam * 0.7), 5, 1);
     const motores = this.fx.agregarMotores(modelo, ASSETS[`npc_${n.tipo}`]);
+    montarCanones(modelo, `npc_${n.tipo}`, canonesDe(`npc_${n.tipo}`, nivelCanones(n)));
     return { grupo, modelo, barra, relleno, tam, motores };
   }
 
   crearDron(d) {
     const id = `dron_${d.tipo === 'ataque' ? 'ataque' : 'reparacion'}_${d.bando === 'jugador' ? 'azul' : 'rojo'}`;
     const def = ASSETS[id], grupo = new THREE.Group(), modelo = instanciaUnica(id);
-    if (d.tipo === 'sanguijuela') pintar(modelo, 'sirko');
-    else encenderLuces(modelo);
+    pintar(modelo, d.dueno.empresa); // mismo color que la nave de su empresa
     grupo.add(modelo);
     this.scene.add(grupo);
     def.motores ??= detectarToberas(modelo, def.tam);
-    return { grupo, modelo, tam: def.tam, motores: this.fx.agregarMotores(modelo, def), haz: this.fx.crearHaz(d.tipo === 'sanguijuela') };
+    return { grupo, modelo, dueno: d.dueno, tam: def.tam, motores: this.fx.agregarMotores(modelo, def), haz: this.fx.crearHaz(d.tipo === 'sanguijuela') };
+  }
+
+  // Los cañones miran al blanco mientras disparan y luego vuelven al frente
+  apuntarCanones(modelo, e, s, dt) {
+    const meta = s.tiempo < (e.apuntaHasta ?? 0) ? e.apunta - e.h : 0;
+    for (const c of modelo.userData.canones) {
+      c.rotation.y += Math.atan2(Math.sin(meta - c.rotation.y), Math.cos(meta - c.rotation.y)) * Math.min(1, GIRO_CANONES * dt);
+    }
   }
 
   // Crea y borra objetos para reflejar una lista de la simulación
@@ -376,6 +393,12 @@ export class Escena {
     if (this.jugador?.naveId !== j.naveId || this.jugador.empresa !== j.empresa) this.ponerNaveJugador(j.naveId, j.empresa);
     const jx = lerp(j.px, j.x), jz = lerp(j.pz, j.z);
     const v = this.jugador;
+    const armas = armasMontadas(j), firma = armas.map((a) => a.arma + a.nivel + a.puesto).join();
+    if (v.armas !== firma) {
+      montarArmas(v.modelo, `nave_${j.naveId}`, armas);
+      v.armas = firma;
+    }
+    this.apuntarCanones(v.modelo, j, s, dtCuadro);
     v.grupo.visible = !j.muerto;
     v.grupo.position.set(jx, ALTURA_NAVES + Math.sin(t * 1.8) * 2, jz);
     v.grupo.rotation.y = lerpAng(j.ph, j.h);
@@ -414,6 +437,11 @@ export class Escena {
     this.foco.z += (jz - this.foco.z) * suave;
     this.camara.position.copy(this.foco).add(this.desfase);
     this.camara.lookAt(this.foco);
+    if (this.sacudida > 0.1) {
+      this.camara.position.x += (Math.random() - 0.5) * this.sacudida;
+      this.camara.position.z += (Math.random() - 0.5) * this.sacudida;
+      this.sacudida *= Math.exp(-dtCuadro * 9);
+    }
     this.camara.updateMatrixWorld();
     this.posNave.set(jx, ALTURA_NAVES, jz);
     if (this.libre.activa) this.libre.actualizar(dtCuadro, this.posNave, v);
@@ -438,6 +466,7 @@ export class Escena {
       o.grupo.position.set(x, ALTURA_NAVES + Math.sin(t * 1.5 + n.id) * 3, z);
       o.grupo.rotation.y = lerpAng(n.ph, n.h);
       o.modelo.rotation.z = THREE.MathUtils.clamp(-n.giroVel * 0.14, -0.35, 0.35);
+      this.apuntarCanones(o.modelo, n, s, dtCuadro);
       const max = NPCS[n.tipo].casco;
       this.fx.animarMotores(o.motores, n.vel, NPCS[n.tipo].velocidad, dtCuadro, t);
       if (emitir && n.casco / max < CASCO_CRITICO) this.fx.humoDeDanio(x, z, o.tam);
@@ -485,6 +514,18 @@ export class Escena {
       o.rotation.y = t * 0.9;
       o.visible = b.vida > 8 || Math.sin(t * 10) > 0; // parpadea antes de desaparecer
     }
+    this.sincronizarLista(this.misiles, s.misiles, (m) => {
+      const o = instancia(m.asset), { grosor } = ASSETS[m.asset];
+      o.scale.set(grosor, grosor, 1); // más delgado, sin perder largo
+      this.scene.add(o);
+      return o;
+    });
+    for (const m of s.misiles) {
+      const o = this.misiles.get(m.id), x = lerp(m.px, m.x), z = lerp(m.pz, m.z);
+      o.position.set(x, ALTURA_NAVES, z);
+      o.rotation.y = m.h;
+      this.fx.estelaMisil(o.userData, x - Math.sin(m.h) * ASSETS[m.asset].tam * 0.5, z - Math.cos(m.h) * ASSETS[m.asset].tam * 0.5, m.estela);
+    }
     this.sincronizarLista(this.minas, s.minas, () => { const o = instancia('mina'); this.scene.add(o); return o; });
     for (const m of s.minas) {
       const o = this.minas.get(m.id);
@@ -514,7 +555,7 @@ export class Escena {
       this.relojGuerra = (this.relojGuerra ?? 0) + dtCuadro;
       if (this.relojGuerra > RITMO_GUERRA) {
         this.relojGuerra = 0;
-        const a = Math.random() * 6.28, r = 150 + Math.random() * 420;
+        const a = Math.random() * 6.28, r = 240 + Math.random() * 670;
         this.fx.explosion(Math.cos(a) * r, Math.sin(a) * r, 0.5);
       }
     }
@@ -524,10 +565,24 @@ export class Escena {
     this.renderer.render(this.scene, vista);
   }
 
+  sacudir(fuerza) {
+    if (!QUIETO) this.sacudida = Math.min(22, Math.max(this.sacudida ?? 0, fuerza));
+  }
+
+  // Punto del plano de las naves en píxeles de pantalla
+  aPantalla(x, z) {
+    const p = new THREE.Vector3(x, ALTURA_NAVES, z).project(this.libre.activa ? this.libre.camara : this.camara);
+    return { x: (p.x + 1) / 2 * innerWidth, y: (1 - p.y) / 2 * innerHeight };
+  }
+
   procesarEvento(ev) {
     if (ev.t === 'mapa') return this.ponerMapa(ev.id);
+    if (ev.t === 'explosion') {
+      const cerca = 1 - Math.hypot(ev.x - this.posNave.x, ev.z - this.posNave.z) / ALCANCE_SACUDIDA;
+      if (cerca > 0) this.sacudir(16 * ev.tam * cerca);
+    }
     if (ev.t !== 'disparo') return this.fx.procesar(ev);
     const v = ev.id === 0 ? this.jugador : this.npcs.get(ev.id) ?? this.drones.get(ev.id);
-    if (v) this.fx.fogonazo(ev.x, ev.z, ev.ang, ev.empresa, v.tam);
+    if (v) this.fx.fogonazo(ev.x, ev.z, ev.ang, ev.empresa, ev.torreta ? 0 : v.tam);
   }
 }

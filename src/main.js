@@ -1,12 +1,16 @@
+import '@fontsource/jetbrains-mono/500.css';
+import '@fontsource/jetbrains-mono/700.css';
+import '@fontsource/jetbrains-mono/800.css';
 // Punto de entrada: une simulación, render, HUD y controles.
 import { cargarAssets } from './models.js';
 import { Escena } from './render.js';
 import { VISTAS } from './camara-libre.js';
-import { RANGOS, EMPRESAS, EMPRESA_INICIAL } from './data.js';
+import { RANGOS, EMPRESAS, EMPRESA_INICIAL, MAPAS } from './data.js';
 import { Hud } from './hud.js';
 import { Hangar } from './hangar.js';
 import {
   DT, crearEstado, tick, fijarNivel, saltarPortal, cambiarEmpresa, ordenMover, npcEnPunto, hayBotinEnPunto, seleccionar, alternarAtaque, usarHabilidad, puedeUsarHangar,
+  dispararMisiles,
 } from './sim.js';
 
 const $ = (id) => document.getElementById(id);
@@ -17,7 +21,7 @@ const empresa = EMPRESAS[params.get('empresa')] ? params.get('empresa') : EMPRES
 
 async function iniciar() {
   try {
-    await cargarAssets((p) => { $('carga-txt').textContent = `Cargando modelos… ${Math.round(p * 100)} %`; });
+    await cargarAssets((p) => { $('carga-txt').textContent = `Cargando modelos… ${Math.round(p * 100)} %`; $('carga-progreso').style.width = `${p * 100}%`; });
   } catch (e) {
     console.error(e);
     $('carga-txt').textContent = 'No se pudieron cargar los modelos. Revisa assets/pack/ y corre npm run assets.';
@@ -51,7 +55,13 @@ async function iniciar() {
     }
     for (const ev of s.eventos) {
       if (ev.t === 'mensaje') hud.mensaje(ev.texto, ev.tipo);
-      else escena.procesarEvento(ev);
+      else if (ev.t === 'danio') {
+        hud.numero(ev, escena.aPantalla(ev.x, ev.z));
+        if (ev.propio) escena.sacudir(7);
+      } else {
+        if (ev.t === 'mapa') hud.llegada(MAPAS[ev.id].nombre);
+        escena.procesarEvento(ev);
+      }
     }
     s.eventos.length = 0;
     if (hangar.abierto && !puedeUsarHangar(s)) hangar.cerrar();
@@ -113,6 +123,10 @@ function conectarControles(s, escena, hud, hangar) {
   });
 
   $('btn-atacar').addEventListener('click', () => alternarAtaque(s));
+  $('btn-misil').addEventListener('click', (e) => {
+    dispararMisiles(s);
+    e.currentTarget.blur(); // si conserva el foco, Espacio lo volvería a pulsar en vez de atacar
+  });
   $('btn-hangar').addEventListener('click', () => hangar.alternar());
 
   // Cada clic pasa al siguiente rango y al llegar al último vuelve a empezar
@@ -176,6 +190,7 @@ function conectarControles(s, escena, hud, hangar) {
     else if (e.code === 'Space') { e.preventDefault(); alternarAtaque(s); }
     else if (e.key === 'h' || e.key === 'H') { if (puedeUsarHangar(s)) hangar.alternar(); }
     else if (e.key === 'j' || e.key === 'J') saltarPortal(s);
+    else if (e.key === 'm' || e.key === 'M') dispararMisiles(s);
     else if (dev && (e.key === 'c' || e.key === 'C')) alternarCamara();
     else if (dev && (e.key === 'f' || e.key === 'F')) alternarAncla();
     else if (e.key === 'Escape') {

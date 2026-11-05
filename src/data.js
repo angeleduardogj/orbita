@@ -2,15 +2,15 @@
 // Tiempos en segundos, distancias en unidades del mundo, velocidades en unidades/s.
 
 export const MUNDO = {
-  tamano: 6000,            // el mundo va de -3000 a +3000 en X y Z
-  radioZonaSegura: 620,    // círculo alrededor de la base: nadie dispara ni recibe daño
+  tamano: 9000,            // el mundo va de -4500 a +4500 en X y Z
+  radioZonaSegura: 990,    // círculo alrededor de la base: nadie dispara ni recibe daño
   tickHz: 20,              // simulación con paso fijo
   sector: 1000,            // lado de cada sector de la cuadrícula
   subdivision: 250,        // separación de las líneas finas
-  aparicion: { x: 0, z: 340 }, // donde nace y reaparece el jugador
-  numAsteroides: 70,
-  numEscombros: 90,       // basura espacial
-  numPolvo: 26,
+  aparicion: { x: 0, z: 540 }, // donde nace y reaparece el jugador
+  numAsteroides: 150,
+  numEscombros: 190,      // basura espacial
+  numPolvo: 55,
 };
 
 // Nombre del sector de un punto: columna con letra (X) y fila con número (Z), como "C4"
@@ -24,6 +24,7 @@ export const COMBATE = {
   velocidadLaser: 1500,
   giroPunteria: 2.5,       // la nariz gira esta cantidad de veces más rápido que el rumbo
   radioBotin: 55,          // distancia a la que se recoge una caja al pasar encima
+  radioCasco: 0.35,        // radio del casco por unidad de tamaño: el alcance se mide de borde a borde
   vidaBotin: 60,
   regenEscudoEspera: 4,    // segundos sin recibir daño antes de regenerar escudo
   regenEscudo: 0.05,       // fracción del escudo máximo por segundo
@@ -53,17 +54,17 @@ export const EMPRESA_INICIAL = 'tierra';
 
 // Mapas unidos por portales. Saltar te deja junto al portal de regreso en el mapa destino.
 // El mapa central no es de nadie: su base chocada está abierta para todos.
-const portales = (a, b) => [{ x: 0, z: -2500, a: 'centro' }, { x: 2500, z: 2000, a }, { x: -2500, z: 2000, a: b }];
+const portales = (a, b) => [{ x: 0, z: -3800, a: 'centro' }, { x: 3800, z: 3000, a }, { x: -3800, z: 3000, a: b }];
 export const MAPAS = {
   tierra: { nombre: 'Tierra', empresa: 'tierra', portales: portales('marte', 'venus') },
   marte:  { nombre: 'Marte',  empresa: 'marte',  portales: portales('venus', 'tierra') },
   venus:  { nombre: 'Venus',  empresa: 'venus',  portales: portales('tierra', 'marte') },
   centro: {
     nombre: 'Frente Central', empresa: null,
-    portales: [{ x: 0, z: 2500, a: 'tierra' }, { x: -2500, z: -2000, a: 'marte' }, { x: 2500, z: -2000, a: 'venus' }],
+    portales: [{ x: 0, z: 3800, a: 'tierra' }, { x: -3800, z: -3000, a: 'marte' }, { x: 3800, z: -3000, a: 'venus' }],
   },
 };
-export const RADIO_PORTAL = 240; // a esta distancia ya se puede saltar
+export const RADIO_PORTAL = 340; // a esta distancia ya se puede saltar
 
 // Cuántos bots hay de cada empresa según el mapa
 export const POBLACION = {
@@ -84,8 +85,8 @@ export const RANGOS = [
   { nivel: 19, nombre: 'Almirante', insignia: 'estrella', cantidad: 3 },
 ];
 
-export const INICIO = { nivel: 1, creditos: 500, plasmita: 0, nave: 'chispa', drones: [] };
-export const INICIO_DEMO = { nivel: 15, creditos: 150000, plasmita: 600, nave: 'chispa', drones: ['ataque', 'ataque', 'ataque', 'ataque', 'ataque', 'ataque', 'reparacion', 'reparacion', 'reparacion'] };
+export const INICIO = { nivel: 1, creditos: 500, plasmita: 0, nave: 'chispa', drones: [], laser: 'pulso' };
+export const INICIO_DEMO = { nivel: 15, creditos: 150000, plasmita: 600, nave: 'chispa', drones: ['ataque', 'ataque', 'ataque', 'ataque', 'ataque', 'ataque', 'reparacion', 'reparacion', 'reparacion'], laser: 'pulso' };
 
 // Habilidades comunes a todas las naves. La cuarta ranura es el especial de cada nave.
 export const HABILIDADES = {
@@ -266,6 +267,57 @@ export const NAVES = [
   },
 ].sort((a, b) => a.nivel - b.nivel);
 
+// Cómo dispara cada clase. Las naves chicas apuntan con la nariz; cruceros, transportes y
+// capitales llevan torretas: siguen su rumbo y disparan por el costado que da al objetivo.
+// Disparo desde los cañones de la nave: cada salva reparte el daño entre varios cañones
+export const ARMAMENTO = { salva: 3, sigueApuntando: 0.9, nivelMaximo: 3, vidaMisil: 7, radioImpacto: 30 };
+
+// Armas del jugador. Sus valores multiplican el daño, la cadencia y el alcance de la nave,
+// y `danio` en los misiles es por cada disparo base de la nave. La lista `mejora` da el
+// multiplicador y el precio de cada nivel; el nivel 1 viene con la compra del arma.
+// `tamano` es el socket mínimo donde cabe: 1 chico, 2 mediano, 3 grande.
+export const LASERES = {
+  pulso: { id: 'pulso', nombre: 'Láser de Pulso', desc: 'Equilibrado. Con el que empieza toda nave.', precio: 0, tamano: 1, danio: 1, cadencia: 1, alcance: 1 },
+  enjambre: { id: 'enjambre', nombre: 'Láser Enjambre', desc: 'Dispara muy rápido, con menos daño y alcance.', precio: 9000, tamano: 1, danio: 0.62, cadencia: 0.55, alcance: 0.9 },
+  lanza: { id: 'lanza', nombre: 'Láser Lanza', desc: 'Lento pero potente y de largo alcance.', precio: 16000, tamano: 2, danio: 1.4, cadencia: 1.3, alcance: 1.2 },
+};
+// Vuelo: `salida` es cuánto abre hacia su lado al salir, `giro` lo que corrige por segundo y
+// `ondula` cuánto serpentea. Los tres en radianes. `estela` es el rastro de fx.js.
+export const MISILES = {
+  dardo: { id: 'dardo', nombre: 'Misil Dardo', desc: 'Rápido y de recarga corta.', precio: 8000, tamano: 1, asset: 'misil_dardo', danio: 2, recarga: 5, velocidad: 900, radio: 0, salida: 0.35, giro: 8, ondula: 0.45, estela: 'fina' },
+  cazador: { id: 'cazador', nombre: 'Misil Cazador', desc: 'Más daño, a velocidad media.', precio: 18000, tamano: 1, asset: 'misil_cazador', danio: 4, recarga: 8, velocidad: 650, radio: 0, salida: 1.25, giro: 3.6, ondula: 0, estela: 'media' },
+  martillo: { id: 'martillo', nombre: 'Misil Martillo', desc: 'Lento, estalla y daña a todos alrededor.', precio: 32000, tamano: 1, asset: 'misil_martillo', danio: 6, recarga: 13, velocidad: 430, radio: 260, salida: 0.8, giro: 1.8, ondula: 0, estela: 'pesada' },
+};
+export const MEJORA_ARMA = { danio: [1, 1.3, 1.7], precio: [0, 0.75, 2.5] }; // precio: fracción del precio del arma, o de MEJORA_BASE si es más barata
+export const MEJORA_BASE = 5000;
+
+// Tipos de nave: cuántos sockets tienen, el tamaño máximo de arma que aceptan y su cupo de drones.
+// Explorador, Minero y Bombardero están definidos, pero aún no tienen nave en el juego.
+export const TIPOS = {
+  interceptor: { nombre: 'Interceptor', laser: 2, misil: 2, utilidad: 1, tamano: 1, drones: 1 },
+  caza: { nombre: 'Caza', laser: 4, misil: 2, utilidad: 1, tamano: 1, drones: 2 },
+  pesado: { nombre: 'Pesado', laser: 6, misil: 2, utilidad: 2, tamano: 2, drones: 3 },
+  bombardero: { nombre: 'Bombardero', laser: 2, misil: 6, utilidad: 1, tamano: 2, drones: 2 },
+  crucero: { nombre: 'Crucero', laser: 8, misil: 4, utilidad: 3, tamano: 2, drones: 0 },
+  capital: { nombre: 'Capital', laser: 12, misil: 6, utilidad: 6, tamano: 3, drones: 0 },
+  explorador: { nombre: 'Explorador', laser: 2, misil: 2, utilidad: 5, tamano: 1, drones: 3 },
+  minero: { nombre: 'Minero', laser: 2, misil: 0, utilidad: 5, tamano: 2, drones: 3 },
+  transporte: { nombre: 'Transporte', laser: 4, misil: 2, utilidad: 6, tamano: 2, drones: 0 },
+  reparadora: { nombre: 'Reparadora', laser: 2, misil: 2, utilidad: 5, tamano: 1, drones: 5 },
+};
+const NAVES_POR_TIPO = {
+  interceptor: ['chispa', 'colibri', 'lince'],
+  caza: ['vigia', 'navaja', 'cometa', 'aguja', 'sombra'],
+  pesado: ['eclipse', 'yunque', 'granizo', 'coloso', 'trueno', 'tormenta', 'fantasma', 'escarabajo'],
+  crucero: ['bastion', 'centinela'],
+  capital: ['nodriza', 'acorazada', 'titan'],
+  transporte: ['mula', 'caravana'],
+  reparadora: ['marea'],
+};
+for (const [tipo, ids] of Object.entries(NAVES_POR_TIPO)) for (const id of ids) NAVES.find((n) => n.id === id).tipo = tipo;
+
+for (const n of NAVES) n.torretas = ['bastion', 'centinela', 'mula', 'caravana', 'nodriza', 'acorazada', 'titan'].includes(n.id);
+
 // Facción hostil inventada: el Enjambre Sirko.
 // `anillo` = distancia al centro donde aparecen: entre más lejos, más peligroso.
 export const NPCS = {
@@ -276,35 +328,35 @@ export const NPCS = {
   },
   // Bots de las empresas: usan cascos de nave con la paleta de su empresa
   caza: {
-    nombre: 'Caza', cantidad: 0, anillo: [800, 2600], bot: true,
+    nombre: 'Caza', cantidad: 0, anillo: [1300, 3900], bot: true,
     casco: 1600, danio: 42, cadencia: 0.8, alcance: 400, velocidad: 240, giro: 2.6, aceleracion: 300,
-    aggro: 620, correa: 1500, patrulla: 500, reaparicion: 18,
+    aggro: 620, correa: 2250, patrulla: 500, reaparicion: 18,
     xp: 180, creditos: 500, plasmita: 1, probPlasmita: 0.2, plasmitaExtra: 1,
   },
   pesado: {
-    nombre: 'Pesado', cantidad: 0, anillo: [800, 2600], bot: true,
+    nombre: 'Pesado', cantidad: 0, anillo: [1300, 3900], bot: true, arma: 2,
     casco: 4200, danio: 90, cadencia: 0.9, alcance: 440, velocidad: 170, giro: 1.8, aceleracion: 200,
-    aggro: 660, correa: 1500, patrulla: 400, reaparicion: 32,
+    aggro: 660, correa: 2250, patrulla: 400, reaparicion: 32,
     xp: 620, creditos: 1800, plasmita: 6, probPlasmita: 0.4, plasmitaExtra: 3,
   },
   espina: {
-    nombre: 'Espina Sirko', cantidad: 34, anillo: [850, 1900],
+    nombre: 'Espina Sirko', cantidad: 50, anillo: [1350, 2900],
     casco: 400, danio: 18, cadencia: 0.9, alcance: 320, velocidad: 220, giro: 3, aceleracion: 320,
-    aggro: 480, correa: 1100, patrulla: 320, reaparicion: 12,
+    aggro: 480, correa: 1650, patrulla: 320, reaparicion: 12,
     xp: 60, creditos: 180, plasmita: 0, probPlasmita: 0.15, plasmitaExtra: 1,
   },
   zarpa: {
-    nombre: 'Zarpa Sirko', cantidad: 20, anillo: [1700, 2600],
+    nombre: 'Zarpa Sirko', cantidad: 30, anillo: [2600, 3900],
     casco: 1400, danio: 45, cadencia: 0.8, alcance: 380, velocidad: 200, giro: 2.4, aceleracion: 260,
     drones: ['sanguijuela'],
-    aggro: 560, correa: 1300, patrulla: 380, reaparicion: 20,
+    aggro: 560, correa: 1950, patrulla: 380, reaparicion: 20,
     xp: 220, creditos: 650, plasmita: 2, probPlasmita: 0.3, plasmitaExtra: 2,
   },
   behemot: {
-    nombre: 'Behemot Sirko', cantidad: 8, anillo: [2500, 3300],
+    nombre: 'Behemot Sirko', cantidad: 12, anillo: [3700, 4300],
     casco: 6000, danio: 120, cadencia: 0.9, alcance: 460, velocidad: 150, giro: 1.4, aceleracion: 160,
-    drones: ['ataque', 'ataque', 'sanguijuela'],
-    aggro: 640, correa: 1500, patrulla: 300, reaparicion: 40,
+    drones: ['ataque', 'ataque', 'sanguijuela'], torretas: true, arma: 3,
+    aggro: 640, correa: 2250, patrulla: 300, reaparicion: 40,
     xp: 900, creditos: 2600, plasmita: 10, probPlasmita: 0.5, plasmitaExtra: 6,
   },
 };

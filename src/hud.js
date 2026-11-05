@@ -1,6 +1,8 @@
 // HUD en DOM: barras, recursos, objetivo, minimapa, habilidades y mensajes.
 import { MUNDO, NPCS, NIVELES, HABILIDADES, PILOTO, RANGOS, EMPRESAS, MAPAS, RADIO_PORTAL, nombreSector } from './data.js';
-import { naveDe, statsJugador, objetivoActual, enZonaSegura, puedeUsarHangar, hayZonaSegura, portalCercano } from './sim.js';
+import { fotoNave, fotoAsset, fotoArma, fotoPieza } from './models.js';
+import { ICONOS } from './assetmap.js';
+import { naveDe, statsJugador, objetivoActual, distBorde, enZonaSegura, puedeUsarHangar, hayZonaSegura, portalCercano, estadoMisiles, equipoDe } from './sim.js';
 
 const $ = (id) => document.getElementById(id);
 const num = (n) => Math.ceil(n).toLocaleString('es-MX');
@@ -29,7 +31,10 @@ const NOMBRES_EFECTO = {
   blindaje: 'Casco reforzado', invisible: 'Invisible', asedio: 'Modo asedio',
 };
 
+const MAX_NUMEROS = 16;
 const RANURAS = ['impulso', 'reparacion', 'barrera', 'especial'];
+const LISTO = [{ filter: 'brightness(2.2)' }, { filter: 'brightness(1)' }];
+const GOLPE = [{ opacity: 0.85 }, { opacity: 0 }];
 
 export class Hud {
   constructor({ alUsar }) {
@@ -38,11 +43,39 @@ export class Hud {
     for (const slot of RANURAS) {
       const b = document.createElement('button');
       b.className = 'habilidad' + (slot === 'especial' ? ' especial' : '');
-      b.innerHTML = `<kbd>${RANURAS.indexOf(slot) + 1}</kbd><span class="nombre"></span><div class="sombra"></div><div class="tiempo"></div>`;
+      b.innerHTML = `<kbd>${RANURAS.indexOf(slot) + 1}</kbd><img alt=""><span class="nombre"></span><div class="sombra"></div><div class="tiempo"></div>`;
       b.addEventListener('click', () => alUsar(slot));
       $('habilidades').append(b);
-      this.botones[slot] = { b, nombre: b.querySelector('.nombre'), sombra: b.querySelector('.sombra'), tiempo: b.querySelector('.tiempo') };
+      this.botones[slot] = { b, img: b.querySelector('img'), nombre: b.querySelector('.nombre'), sombra: b.querySelector('.sombra'), tiempo: b.querySelector('.tiempo') };
+      if (ICONOS[slot]) fotoPieza(ICONOS[slot]).then((url) => { this.botones[slot].img.src = url; });
     }
+    $('ico-atacar').src = fotoArma('pulso');
+    $('ico-portal').src = fotoAsset('portal_aro');
+  }
+
+  // Número de daño que sube desde el punto del golpe
+  numero({ valor, propio }, { x, y }) {
+    const caja = $('numeros');
+    if (caja.children.length >= MAX_NUMEROS) return;
+    const d = document.createElement('div');
+    d.textContent = Math.round(valor).toLocaleString('es-MX');
+    if (propio) d.className = 'propio';
+    d.style.left = `${x + (Math.random() - 0.5) * 34}px`;
+    d.style.top = `${y - 18}px`;
+    caja.append(d);
+    d.animate([{ transform: 'translate(-50%, 0) scale(1.25)', opacity: 1 }, { transform: 'translate(-50%, -34px)', opacity: 1, offset: 0.6 }, { transform: 'translate(-50%, -52px)', opacity: 0 }], 750).onfinish = () => d.remove();
+  }
+
+  // Letrero grande al centro: bloque azul con su etiqueta arriba
+  cartel(etiqueta, texto) {
+    $('cartel-etiqueta').textContent = etiqueta;
+    $('cartel-texto').textContent = texto;
+    $('cartel').animate([{ opacity: 0, transform: 'translate(-50%, 10px)' }, { opacity: 1, transform: 'translate(-50%, 0)', offset: 0.12 }, { opacity: 1, transform: 'translate(-50%, 0)', offset: 0.82 }, { opacity: 0, transform: 'translate(-50%, 0)' }], 2000);
+  }
+
+  llegada(nombre) {
+    $('transicion').animate([{ opacity: 1 }, { opacity: 1, offset: 0.3 }, { opacity: 0 }], 700);
+    this.cartel('Sector', nombre);
   }
 
   mensaje(texto, tipo) {
@@ -75,15 +108,30 @@ export class Hud {
     const j = s.jugador, st = statsJugador(j), nave = naveDe(j.naveId);
 
     $('nave-nombre').textContent = nave.nombre;
+    if (j.naveId + j.empresa !== this.fotoVista) {
+      this.fotoVista = j.naveId + j.empresa;
+      const url = fotoNave(`nave_${j.naveId}`, j.empresa);
+      $('nave-foto').src = $('ico-hangar').src = this.botones.especial.img.src = url;
+    }
     const portal = portalCercano(s);
     $('btn-portal').hidden = !portal;
     if (portal) $('btn-portal-txt').textContent = `Saltar a ${MAPAS[portal.a].nombre}`;
     $('nivel').textContent = j.nivel;
+    if (this.nivelVisto && j.nivel > this.nivelVisto) this.cartel('Subiste de nivel', `Nivel ${j.nivel}`);
+    this.nivelVisto = j.nivel;
     $('creditos').textContent = num(j.creditos);
     $('plasmita').textContent = num(j.plasmita);
-    $('barra-casco').style.width = `${(j.casco / st.casco) * 100}%`;
+    $('barra-casco').style.width = $('rastro-casco').style.width = `${(j.casco / st.casco) * 100}%`;
     $('txt-casco').textContent = `Casco ${num(j.casco)} / ${num(st.casco)}`;
-    $('barra-escudo').style.width = `${(j.escudo / st.escudo) * 100}%`;
+    $('barra-escudo').style.width = $('rastro-escudo').style.width = `${(j.escudo / st.escudo) * 100}%`;
+    const vida = j.casco + j.escudo, critico = j.casco / st.casco < 0.35 && !j.muerto;
+    if (vida < this.vidaVista && performance.now() - (this.ultimoGolpe ?? 0) > 250) {
+      this.ultimoGolpe = performance.now();
+      $('golpe').animate(GOLPE, 420);
+    }
+    this.vidaVista = vida;
+    $('estado').classList.toggle('critico', critico);
+    $('vineta').classList.toggle('critico', critico);
     $('txt-escudo').textContent = `Escudo ${num(j.escudo)} / ${num(st.escudo)}`;
 
     const maximo = j.nivel >= NIVELES.maximo;
@@ -97,9 +145,9 @@ export class Hud {
     if (obj) {
       const d = NPCS[obj.tipo];
       $('obj-nombre').textContent = d.nombre;
-      $('obj-barra').style.width = `${(obj.casco / d.casco) * 100}%`;
+      $('obj-barra').style.width = $('obj-rastro').style.width = `${(obj.casco / d.casco) * 100}%`;
       $('obj-txt').textContent = `${num(obj.casco)} / ${num(d.casco)}`;
-      const distancia = Math.hypot(obj.x - j.x, obj.z - j.z);
+      const distancia = distBorde(s, j, obj);
       $('obj-nota').textContent = enZonaSegura(j) ? 'Estás en la zona segura'
         : distancia > st.alcance ? `Fuera de alcance (${Math.round(distancia)} / ${st.alcance | 0})`
         : j.atacando ? 'Atacando' : 'En alcance';
@@ -111,8 +159,10 @@ export class Hud {
       const def = slot === 'especial' ? nave.especial : HABILIDADES[slot];
       v.nombre.textContent = def.nombre;
       const resta = j.recargas[slot];
-      v.sombra.style.height = `${(resta / def.recarga) * 100}%`;
+      v.sombra.style.setProperty('--resta', resta / def.recarga);
       v.tiempo.textContent = resta > 0 ? Math.ceil(resta) : '';
+      if (v.enfriando && resta <= 0) v.b.animate(LISTO, 500); // destello al quedar lista
+      v.enfriando = resta > 0;
       v.b.classList.toggle('enfriando', resta > 0);
     }
 
@@ -121,6 +171,12 @@ export class Hud {
     if (activos !== this.activos) { $('efectos').innerHTML = activos; this.activos = activos; }
 
     $('btn-atacar').classList.toggle('activo', j.atacando);
+    const misiles = estadoMisiles(j), txtMisil = !misiles.total ? 'Sin misiles' : misiles.listos ? `Misiles ${misiles.listos}/${misiles.total}` : `Misiles ${Math.ceil(misiles.resta)}s`;
+    if (txtMisil !== this.txtMisil) { $('btn-misil-txt').textContent = txtMisil; this.txtMisil = txtMisil; }
+    $('btn-misil').disabled = !misiles.total;
+    const lanzador = equipoDe(j).misil.find(Boolean)?.id ?? 'dardo';
+    if (lanzador !== this.lanzadorVisto) { this.lanzadorVisto = lanzador; $('ico-misil').src = fotoAsset(`misil_${lanzador}`); }
+    $('btn-misil').classList.toggle('enfriando', misiles.total > 0 && !misiles.listos);
     $('btn-hangar').disabled = !puedeUsarHangar(s);
     $('muerte').hidden = !j.muerto;
 
@@ -143,7 +199,7 @@ export class Hud {
     const j = s.jugador;
 
     // Plano azul con cuadrícula fina y sectores
-    g.fillStyle = '#0b2a57';
+    g.fillStyle = '#2b2d31';
     g.fillRect(0, 0, T, T);
     const lineas = (paso, color, ancho) => {
       g.strokeStyle = color;
@@ -156,15 +212,15 @@ export class Hud {
       }
       g.stroke();
     };
-    lineas(MUNDO.subdivision, 'rgba(127,188,255,.16)', 1);
-    lineas(MUNDO.sector, 'rgba(159,208,255,.5)', 1.5);
-    g.strokeStyle = '#bfe0ff';
+    lineas(MUNDO.subdivision, 'rgba(181,186,193,.16)', 1);
+    lineas(MUNDO.sector, 'rgba(181,186,193,.5)', 1.5);
+    g.strokeStyle = '#f2f3f5';
     g.lineWidth = 3;
     g.strokeRect(1.5, 1.5, T - 3, T - 3);
 
     // Letras de columna y números de fila
     const celda = (MUNDO.sector / MUNDO.tamano) * T, total = MUNDO.tamano / MUNDO.sector;
-    g.fillStyle = 'rgba(191,224,255,.8)';
+    g.fillStyle = 'rgba(242,243,245,.8)';
     g.font = '600 17px ui-monospace, Menlo, monospace';
     g.textAlign = 'center';
     g.textBaseline = 'middle';

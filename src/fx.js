@@ -6,11 +6,18 @@ import { instancia, geometria, texturasFx } from './models.js';
 import { geometriaCabina } from './toberas.js';
 
 export const ALTURA_NAVES = 20; // plano donde vuelan las naves
-const MAX_PARTICULAS = 320;
+const MAX_PARTICULAS = 480;
 const MAX_LASERES = 200;
 
 const azar = (a, b) => a + Math.random() * (b - a);
 const color = (hex) => new THREE.Color(hex);
+
+// Rastro de cada misil: del más fino y rápido al más pesado, con humo
+const ESTELAS = {
+  fina: { paso: 7, t0: 10, dur: 0.3, color: 'escudo' },
+  media: { paso: 7, t0: 15, dur: 0.5, color: 'fuego' },
+  pesada: { paso: 6, t0: 22, dur: 0.6, color: 'fuego', humo: true },
+};
 
 const C = {
   blanco: color(0xffffff),
@@ -284,6 +291,29 @@ export class Efectos {
   }
 
   // Fogonazo en la boca del arma: FX_MuzzleFlash usa Explosion.png
+  // Rastro continuo: suelta partículas a distancia fija desde donde quedó la última
+  estelaMisil(rastro, x, z, tipo) {
+    const receta = ESTELAS[tipo];
+    rastro.x ??= x;
+    rastro.z ??= z;
+    const d = Math.hypot(x - rastro.x, z - rastro.z), pasos = Math.floor(d / receta.paso);
+    for (let i = 1; i <= pasos; i++) {
+      const k = i * receta.paso / d;
+      this.gotaEstela(rastro.x + (x - rastro.x) * k, rastro.z + (z - rastro.z) * k, receta, rastro.n = (rastro.n ?? 0) + 1);
+    }
+    if (pasos) {
+      rastro.x += (x - rastro.x) * pasos * receta.paso / d;
+      rastro.z += (z - rastro.z) * pasos * receta.paso / d;
+    }
+  }
+
+  gotaEstela(x, z, { t0, dur, color, humo }, n) {
+    this.particula({ tex: texturasFx.brillo, x, z, t0, t1: t0 * 0.25, dur, c1: C.blanco, c2: C[color] });
+    if (humo && n % 4 === 0) {
+      this.particula({ tex: texturasFx.nube, normal: true, x, z, vx: azar(-8, 8), vz: azar(-8, 8), t0: t0 * 0.7, t1: t0 * 2.2, dur: 0.9, giro: azar(-1, 1), c1: C.humo, c2: C.humoFin, opacidad: 0.45 });
+    }
+  }
+
   fogonazo(x, z, ang, empresa, tam) {
     const nx = x + Math.sin(ang) * tam * 0.5, nz = z + Math.cos(ang) * tam * 0.5;
     this.particula({ tex: texturasFx.explosion, x: nx, z: nz, t0: 16, t1: 44, dur: 0.1, c1: C.blanco, c2: C.laser[empresa] });

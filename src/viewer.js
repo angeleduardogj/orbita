@@ -4,7 +4,9 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { ASSETS, TEXTURAS_FX, USO_TEXTURAS, PALETA } from './assetmap.js';
-import { cargarAssets, instancia, instanciaUnica, modeloSuelto, agregarLuces } from './models.js';
+import { cargarAssets, instancia, instanciaUnica, modeloSuelto, agregarLuces, montarCanones, montarArmas } from './models.js';
+import { TIPOS, NAVES } from './data.js';
+import { puestosSockets } from './assetmap.js';
 import { BancoEfectos } from './viewer-efectos.js';
 import { detectarToberas } from './toberas.js';
 
@@ -12,6 +14,33 @@ const TAM = 256;
 // Naves que el pack trae en piezas: se muestran armadas junto a sus modelos sueltos
 const ARMADOS = [
   { archivo: 'SM_Ship_Galactic_Carrier_01 + Armor_01', partes: ['SM_Ship_Galactic_Carrier_01', 'SM_Ship_Galactic_Carrier_Armor_01'], carpeta: 'Models (armado)' },
+];
+// Armas que el pack trae dentro de otro modelo: se muestran sueltas, sin pedestal ni nave.
+// Cada familia de torretas viene en tres grados, que son los niveles de mejora.
+// Las naves se muestran con todos sus sockets llenos: láser inicial y misil básico
+function montarTodo(modelo, id) {
+  const nave = NAVES.find((n) => `nave_${n.id}` === id);
+  if (!nave) return montarCanones(modelo, id, Infinity);
+  const { laser, misil } = puestosSockets(id, TIPOS[nave.tipo]);
+  montarArmas(modelo, id, [...laser.map((puesto) => ({ arma: 'pulso', puesto, clase: 'laser' })), ...misil.map((puesto) => ({ arma: 'dardo', puesto, clase: 'misil' }))]);
+}
+
+const PIEZA = 'Models (pieza)';
+const torreta = (nombre, primera, nodos) => ['sencillo', 'doble'].flatMap((forma, f) => [1, 2, 3].map((nivel) => ({
+  archivo: `Arma Nv ${nivel} · ${nombre} ${forma}`,
+  partes: `SM_Prop_Turret_Base_${f ? 'Double' : 'Single'}_0${primera + nivel - 1}`,
+  nodos, carpeta: PIEZA,
+})));
+const PIEZAS_ARMA = [
+  ...torreta('Ametralladora', 1, /Gattling/),
+  ...torreta('Láser', 4, /Laser/),
+  ...torreta('Misil', 7, /Missile/),
+  { archivo: 'Arma · Misil grande sencillo', partes: 'SM_Prop_Turret_Base_Single_010', nodos: /MissileLarge/, carpeta: PIEZA },
+  { archivo: 'Arma · Misil grande doble', partes: 'SM_Prop_Turret_Base_Double_010', nodos: /MissileLarge/, carpeta: PIEZA },
+  { archivo: 'Arma · Torreta pesada sencilla', partes: 'SM_Prop_Turret_Large_01', nodos: /Large_(Top|Barrel)/, carpeta: PIEZA },
+  { archivo: 'Arma · Torreta pesada doble', partes: 'SM_Prop_Turret_Large_02', nodos: /Large_(Top|Barrel)/, carpeta: PIEZA },
+  { archivo: 'Arma · Torreta de Acorazada A', partes: 'SM_Ship_Galactic_Carrier_01', nodos: /Carrier_Gun_01$/, carpeta: PIEZA },
+  { archivo: 'Arma · Torreta de Acorazada B', partes: 'SM_Ship_Galactic_Carrier_01', nodos: /Carrier_Gun_02$/, carpeta: PIEZA },
 ];
 const ESCALA_REAL = 460; // unidades visibles por celda en modo de escala real
 const INCLINACION = THREE.MathUtils.degToRad(55);
@@ -38,6 +67,7 @@ function lugar(id, def) {
   if (id.startsWith('planeta_')) return `Planeta: ${def.nombre}`;
   if (id.startsWith('dron_')) return def.nombre;
   if (id.startsWith('base_')) return def.nombre;
+  if (id.startsWith('misil_')) return def.nombre;
   if (id.startsWith('escombro_')) return 'Basura espacial';
   if (id.startsWith('asteroide_')) return 'Asteroides';
   if (id.startsWith('fx_')) return `Efecto: ${def.nombre}`;
@@ -80,6 +110,8 @@ function clasificar(archivo, carpeta) {
   if (carpeta.includes('Collision')) return ['Colisión', 'Colisión'];
   if (carpeta.includes('FX_Meshes') || n.startsWith('SM_FX')) return ['Efecto', 'Efectos'];
   if (n.startsWith('SM_Hud')) return ['Efecto', 'HUD'];
+  if (carpeta === PIEZA) return ['Parte', 'Armas de nave'];
+  if (/^SM_(Prop_Turret|Prop_Missile|Prop_Mine|MissleBody|Veh_MissleRack)/.test(n)) return ['Completo', 'Armas de nave'];
   if (n.startsWith('SM_Ship_Station')) return ['Completo', 'Estaciones'];
   if (n === 'SM_Ship_Galactic_Carrier_Armor_01') return ['Parte', 'Partes de nave']; // blindaje del Carrier
   if (n.startsWith('SM_Ship')) return ['Completo', 'Naves'];
@@ -160,7 +192,8 @@ async function atender() {
     const celda = pendientes.pop(); // lo último que se vio primero
     if (celda.lienzo.closest('figure').hidden) { celda.pedido = false; continue; }
     try {
-      celda.modelo = celda.id ? instancia(celda.id) : await modeloSuelto(celda.partes ?? celda.archivo);
+      celda.modelo = celda.id ? instancia(celda.id) : await modeloSuelto(celda.partes ?? celda.archivo, celda.nodos);
+      if (celda.id) montarTodo(celda.modelo, celda.id);
       pintar(celda);
       if (!celda.id) {
         // Sin uso en el juego: se libera, ya quedó dibujado en su lienzo
@@ -264,8 +297,9 @@ async function abrirModal(fig) {
   try {
     const medida = enJuego(celda.id);
     const nave = aceptaEfectos(fig);
-    let modelo = medida ? instanciaUnica(celda.id) : celda.id ? instancia(celda.id) : await modeloSuelto(celda.partes ?? celda.archivo);
+    let modelo = medida ? instanciaUnica(celda.id) : celda.id ? instancia(celda.id) : await modeloSuelto(celda.partes ?? celda.archivo, celda.nodos);
     if (nave && !medida) modelo = envolver(modelo); // los motores van a escala del mundo
+    if (celda.id) montarTodo(modelo, celda.id);
     enModal = { modelo, propio: !celda.id };
     visor.scene.add(modelo);
     if (nave) {
@@ -391,11 +425,11 @@ async function iniciar() {
   const orden = (uso) => (a, b) => (uso.has(b.archivo) - uso.has(a.archivo)) || a.archivo.localeCompare(b.archivo);
   const celdas = [];
 
-  for (const { archivo, carpeta, partes } of [...catalogo.modelos, ...ARMADOS].sort(orden(usoModelos))) {
+  for (const { archivo, carpeta, partes, nodos } of [...catalogo.modelos, ...ARMADOS, ...PIEZAS_ARMA].sort(orden(usoModelos))) {
     const lienzo = document.createElement('canvas');
     lienzo.width = lienzo.height = TAM;
     const fig = tarjeta(archivo, carpeta, usoModelos.get(archivo), lienzo);
-    const celda = { archivo, partes, id: idDeModelo.get(archivo), lienzo, g: lienzo.getContext('2d') };
+    const celda = { archivo, partes, nodos, id: idDeModelo.get(archivo), lienzo, g: lienzo.getContext('2d') };
     fig.celda = celda;
     celdas.push(celda);
     $('modelos').append(fig);
